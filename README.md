@@ -21,3 +21,19 @@ char * travel(char *path){
 	Is this done by getindex, type, offset?
 	
 }
+
+//This function searches through a list of dirents and returns the one with a matching path name
+
+struct dirent_q retdirent_p (dirent_q root, char* name){
+	struct dirent_q* temp=root;
+	
+	while(temp!=NULL){
+	
+	if(strcmp(temp->name, name) == 0)
+		return temp;
+		
+	temp=temp->next;
+	}
+	
+	return NULL;
+}

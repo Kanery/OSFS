@@ -37,3 +37,10 @@ struct dirent_q retdirent_p (dirent_q root, char* name){
 	
 	return NULL;
 }
+
+* rmdir pseudocode
+* 1) call retdirent_p
+* 2)  if (dirent_q is a file) reject.
+* 3) if (dirent_q is null) reject
+* 4) if (dirent_q is nonempty) reject
+* 5)  else delete from dirent_q linked list

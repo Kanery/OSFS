@@ -44,3 +44,4 @@ struct dirent_q retdirent_p (dirent_q root, char* name){
 * 3) if (dirent_q is null) reject
 * 4) if (dirent_q is nonempty) reject
 * 5)  else delete from dirent_q linked list
+* 6) free dirent_q

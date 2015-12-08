@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 struct dirent_q
 {
@@ -9,8 +10,13 @@ struct dirent_q
 	int length;
 	//This designates the file's offset from the root
 	off_t offset;
-	
+	mode_t mode;
 	char name[256];
+	pthread_mutex_t mutex;
+	
+	int refcount;
+	int open_flag_count;
+	
 	struct dirent_q *next;
 };
 
@@ -28,6 +34,7 @@ struct inode_q
 
 	//This points to the corresponding head of the data in the superblock.
 	char* data;
+	off_t offset;
 	//Just another reference to the inode's/file's type.
 	char type;
 	//This is an array of references to child dirent pointers.
@@ -57,7 +64,7 @@ struct inode_q *initialize()
 {
 
 	//This is our array of inodes, shartened down to 256 for testing.
-	struct inode_q *inode_array= malloc(256 * sizeof(struct inode_q));
+	struct inode_q *inode_array= malloc(1000000 * sizeof(struct inode_q));
 	return inode_array;
 	
 }
@@ -78,7 +85,7 @@ int retindex (dirent_q *root, char* name)
 }
 
 //This function searches through a list of dirents and returns the one with a matching type to the type requested.
-char rettype (dirent_q *root, char* name)
+char rettype (struct dirent_q *root, char* name)
 {
 	struct dirent_q* temp=root;
 	while(temp!=NULL)
@@ -93,7 +100,7 @@ char rettype (dirent_q *root, char* name)
 }
 
 //This function searches through a list of dirents and returns the one with a matching offset to the offset requested.
-struct dirent_q* retdirent (dirent_q *root, off_t offset)
+struct dirent_q* retdirent (struct dirent_q *root, off_t offset)
 {
 	struct dirent_q* temp=root;
 	while(temp!=NULL)
@@ -106,4 +113,52 @@ struct dirent_q* retdirent (dirent_q *root, off_t offset)
 	}
 	return NULL;
 }
+
+struct dirent_q* finddirent(char *path, struct dirent_q* root)
+{
+	struct dirent_q *temp=root;
+	while(temp!=NULL)
+	{
+		if(strcmp(path, temp->name)==0)
+		{
+			return temp;
+		}
+		temp=temp->next;
+	}
+	return NULL;
+
+}
+	
+
+int capture_spot(struct inode_q array[])
+{
+	int count=0;
+	int length=(sizeof(array)/sizeof(inode_q));
+	
+	while(count<length)
+	{
+		if(array[count]!=NULL)
+		{
+			return count;
+		}
+		count++;
+	}
+	return -1;
+}
+
+struct dirent_q * lobotomy(char * path){
+	
+	for(int i = (strlen(path)-1); int i >= 0; i--)
+	{
+		if(path[i] == "\")
+		{
+			char temp[strlen(path)];
+			strcpy(temp, path)
+			temp[i] = "\0";
+			return followPath(temp);
+		}
+	}
+	return NULL;
+}
+
 

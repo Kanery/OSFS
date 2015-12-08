@@ -28,8 +28,10 @@
 #endif
 
 #include <pthread.h>
+#include <stdarg.h>
 #include "log.h"
 #include "sfs.h"
+//#include "globals.h"
 
 
 
@@ -40,16 +42,20 @@
 //
 
 
+
+
+
+
 //This will initialize the superblock and also the root directory.
-inode_q inode_array[];
-dirent_q *root;
+//#define inode_array (struct inode_q[]) initialize();
+//#define root (struct dirent_q *) create_dirent(0,'d',0, 0,"/root") 
 
 
-static void theFullpath(char fpath[PATH_MAX], const char *path)
+/*static void theFullpath(char fpath[PATH_MAX], const char *path)
 {
     strcpy(fpath, SFS_DATA->rootdir);
     strncat(fpath, path, PATH_MAX);
-}
+}*/
 
 
 
@@ -80,7 +86,8 @@ void *sfs_init(struct fuse_conn_info *conn)
 	int i = 0;
 	for (; i < 1000000; i++)
 	{
-		inode_array[0].offset = &(SFS_DATA->diskfile) + 512*i;
+		inode_array[i].offset = (off_t) (&(SFS_DATA->diskfile) + (512*i));
+		inode_array[i].inUse = 0;
 	}
 	
 	
@@ -155,7 +162,7 @@ int sfs_getattr(const char *path, struct stat *statbuf)
 		goto END;
 	}
 	char type=rettype(root, path);
-	struct dirent_q* temp=finddir(path, root);
+	struct dirent_q* temp=finddirent(path, root);
 	
 	if(type=='d')
 	{
@@ -214,8 +221,18 @@ int sfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
     int retstat = 0;
     log_msg("\nsfs_create(path=\"%s\", mode=0%03o, fi=0x%08x)\n",
 	    path, mode, fi);
+		
+		
+		
+	struct dirent_q *temp2;
+	 
+	int qr;
+	 
+	struct child_ref *temp3;
+		
+	
 	    //If the path is invalid...
-	if(retindex(path)!=-1)
+	if(retindex(root, path)!=-1)
 	{
 		goto FINAL;
 	}
@@ -223,11 +240,14 @@ int sfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	//Finds the next free inode index
 	int place=capture_spot(inode_array);
 	
-	struct dirent_q *new=create_dirent(place, 'f', 512, offset, path):
+	off_t offset=inode_array[place].offset;
+	
+	struct dirent_q *new=create_dirent(place, 'f', 512, offset, path);
 	
 	
 	//If there is no space left on the array...
-	if(!place){
+	if(place == -1)
+	{
 		retstat=1;
 		goto FINAL;
 	}
@@ -237,20 +257,29 @@ int sfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	//Places new dirent into the system
 	while(temp!=NULL)
 	{
-		if(temp->next==NULL){
+		if(temp->next==NULL)
+		{
 			temp->next=new;
 			goto PREP;
 		}
 		temp=temp->next; 
 	 }
 	 
+	 
+	 
+	 
+	 
 	 PREP:
+	temp->inode_index = place;
+	inode_array[place].inUse = 1;
 	 
+	temp2 = lobotomy(path, root);
 	 
-	 struct dirent_q* temp2=lobotomy(path);
-	 struct child_ref *temp3=inode_array[temp->inode_array]->children;
+	qr =retindex(root, temp2->name);
 	 
-	 if(temp3==NULL)
+	temp3=(inode_array[qr]).children;
+	 
+	 if(!temp3)
 	 {
 	 	temp3->point=new;
 	 }
@@ -272,8 +301,8 @@ int sfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	
     
     
-     inode_array[place]->data=NULL;
-	inode_array[place]->type='f';
+     inode_array[place].data=NULL;
+	inode_array[place].type='f';
 	
     retstat=1;
     FINAL:
@@ -288,20 +317,24 @@ int sfs_unlink(const char *path)
     
 	//The dirent and Inode we need to unlink
 	struct dirent_q *unlinkDir = finddirent(path, root);
-	struct inode_q *unlinkIn = inode_array[unlinkDir->inode_index];
+	struct inode_q unlinkIn = inode_array[unlinkDir->inode_index];
 	
 	//If there is something inside it, do not delete
-	if(*unlinkIn.children != NULL)
+	if(unlinkIn.children != NULL)
 	{
 		return retstat;
 	}
 	
+	int q=retindex(root, path);
+	
 	//Delete Inode
-	inode_array[unlinkDir->inode_index] = NULL;
+	(inode_array[q]).data= NULL;
+	(inode_array[q]).type='\0';
+	(inode_array[q]).children=NULL;
 	
 	//Find previous dirent to point it to next dirent (removing unlinkDir from the linked list)
 	struct dirent_q *root_node = root;
-	struct dirent_q * prev_node = root_node
+	struct dirent_q * prev_node = root_node;
 	
 	while(prev_node->next != unlinkDir)
 	{
@@ -336,7 +369,7 @@ int sfs_open(const char *path, struct fuse_file_info *fi)
 	    
 	    
 	    
-	struct dirent_q openDir = finddirent(path, root);
+	struct dirent_q *openDir = finddirent(path, root);
 	if(openDir == NULL)
 	{
 		int success = sfs_create(path, 0755, fi);
@@ -345,7 +378,7 @@ int sfs_open(const char *path, struct fuse_file_info *fi)
 			return retstat;
 		}
 	}
-	struct dirent_q openDir = finddirent(path, root);
+	openDir = finddirent(path, root);
 	if(openDir == NULL)
 	{
 		return retstat;
@@ -381,8 +414,8 @@ int sfs_release(const char *path, struct fuse_file_info *fi)
     log_msg("\nsfs_release(path=\"%s\", fi=0x%08x)\n",
 	  path, fi);
 	  
-	struct dirent_q *relDir = finddir(path, root);
-	if(relDir == NULL || relDir->open_flag_count = 0)
+	struct dirent_q *relDir = finddirent(path, root);
+	if(relDir == NULL || relDir->open_flag_count == 0)
 	{
 		return retstat;
 	}
@@ -412,8 +445,29 @@ int sfs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse
     int retstat = 0;
     log_msg("\nsfs_read(path=\"%s\", buf=0x%08x, size=%d, offset=%lld, fi=0x%08x)\n",
 	    path, buf, size, offset, fi);
+		
+		
+		
 
-   
+		
+	struct dirent_q *readDir = finddirent(path, root);
+	if(readDir == NULL || readDir->open_flag_count == 0 || BLOCK_SIZE < (size + offset))
+	{
+		return retstat;
+	}
+	
+	int qr=readDir->inode_index;
+	struct inode_q readIn = inode_array[qr];
+	
+	char * readSpot = readIn.data + offset;
+	int desig=(offset+readDir->offset)/BLOCK_SIZE;
+	int success = block_read(desig, buf);
+	if(success <= 0)
+	{
+		return retstat;
+	}
+	
+    retstat = 1;       
     return retstat;
 }
 
@@ -431,7 +485,43 @@ int sfs_write(const char *path, const char *buf, size_t size, off_t offset,
     int retstat = 0;
     log_msg("\nsfs_write(path=\"%s\", buf=0x%08x, size=%d, offset=%lld, fi=0x%08x)\n",
 	    path, buf, size, offset, fi);
-    
+		
+		
+		
+		
+	struct dirent_q *writeDir;
+	writeDir= finddirent(path, root);
+	if(writeDir == NULL)
+	{
+		int success = sfs_create(path, 0755, fi);
+		if(success == 0)
+		{
+			return retstat;
+		}
+		writeDir = finddirent(path, root);
+	}
+	
+	if(writeDir == NULL || writeDir->open_flag_count == 0)
+	{
+		return retstat;
+	}
+	
+	int qr=retindex(root, writeDir->name);
+	
+	struct inode_q writeIn = inode_array[qr];
+	char * writeSpot = writeIn.data + offset;
+	int desig=(offset+writeDir->offset)/BLOCK_SIZE;
+	int success = block_write(desig, buf);
+	if(success <= 0)
+	{
+		return retstat;
+	}
+	
+    retstat = 1;       
+  
+		
+		
+	
     
     return retstat;
 }
@@ -443,13 +533,17 @@ int sfs_mkdir(const char *path, mode_t mode)
     int retstat = 0;
     log_msg("\nsfs_mkdir(path=\"%s\", mode=0%3o)\n",
 	    path, mode);
-	    
-	
-	    int retstat = 0;
-    log_msg("\nsfs_create(path=\"%s\", mode=0%03o, fi=0x%08x)\n",
-	    path, mode, fi);
-	    //If the path is invalid...
-	if(retindex(path)!=-1)
+		
+		
+		
+	struct dirent_q *temp2;
+	 
+	int qr;
+	 
+	struct child_ref *temp3;
+		
+    //If the path is invalid...
+	if(retindex(root, path)!=-1)
 	{
 		goto FINAL;
 	}
@@ -457,11 +551,14 @@ int sfs_mkdir(const char *path, mode_t mode)
 	//Finds the next free inode index
 	int place=capture_spot(inode_array);
 	
-	struct dirent_q *new=create_dirent(place, 'd', 512, offset, path):
+	off_t offset=inode_array[place].offset;
+	
+	struct dirent_q *new=create_dirent(place, 'd', 512, offset, path);
 	
 	
 	//If there is no space left on the array...
-	if(!place){
+	if(place != -1)
+	{
 		retstat=1;
 		goto FINAL;
 	}
@@ -471,20 +568,30 @@ int sfs_mkdir(const char *path, mode_t mode)
 	//Places new dirent into the system
 	while(temp!=NULL)
 	{
-		if(temp->next==NULL){
+		if(temp->next==NULL)
+		{
 			temp->next=new;
 			goto PREP;
 		}
 		temp=temp->next; 
 	 }
 	 
+	 
+	 
+	 
+	 
 	 PREP:
+	 temp->inode_index = place;
+	inode_array[place].inUse = 1;
+
 	 
+	temp2 = lobotomy(path, root);
 	 
-	 struct dirent_q* temp2=lobotomy(path);
-	 struct child_ref *temp3=inode_array[temp->inode_array]->children;
+	qr =retindex(root, temp2->name);
 	 
-	 if(temp3==NULL)
+	temp3=(inode_array[qr]).children;
+	 
+	 if(!temp3)
 	 {
 	 	temp3->point=new;
 	 }
@@ -506,12 +613,12 @@ int sfs_mkdir(const char *path, mode_t mode)
 	
     
     
-     inode_array[place]->data=NULL;
-	inode_array[place]->type='d';
+     inode_array[place].data=NULL;
+	inode_array[place].type='d';
 	
     retstat=1;
     FINAL:
-    return retstat;    
+       
 	    
 	    
 	    
@@ -586,8 +693,10 @@ int sfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offse
     
     //We first find a drient with an offset equal to the demanded offset.  If none exists, we return zero.
     struct dirent_q *temp=retdirent(root, offset);
+	
+	int ind=temp->inode_index;
     
-    struct child_ref *children=temp->children;
+    struct child_ref *children=(inode_array[ind]).children;
     
     REPEAT:
     

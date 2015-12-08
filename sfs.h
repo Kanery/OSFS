@@ -2,22 +2,30 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <sys/types.h>
+#include <stdarg.h>
+
+
+struct dirent_q *root;
+struct inode_q *inode_array;
+
+
 
 struct dirent_q
 {
 	int inode_index;
 	char type;
 	int length;
+	int refCount;
 	//This designates the file's offset from the root
 	off_t offset;
 	mode_t mode;
 	char name[256];
-	pthread_mutex_t mutex;
+	struct dirent_q *next;
 	
-	int refcount;
 	int open_flag_count;
 	
-	struct dirent_q *next;
+	pthread_mutex_t mutex;
 };
 
 //This will construct a list of references to dirents thaat are in an inode;
@@ -34,15 +42,16 @@ struct inode_q
 
 	//This points to the corresponding head of the data in the superblock.
 	char* data;
-	off_t offset;
 	//Just another reference to the inode's/file's type.
 	char type;
+	off_t offset;
+	int inUse;
 	//This is an array of references to child dirent pointers.
 	struct child_ref *children;
 	
 };
 
-struct dirent_q *create_dirent(int index, char type, int length, off_t offset, char *name)
+struct dirent_q *create_dirent(int index, char type, int length, off_t offset, const char *name)
 {
 	/*
 	Search dirent_q linked list to find the end and set the final dirent_q node to point to this newly created node.
@@ -55,22 +64,24 @@ struct dirent_q *create_dirent(int index, char type, int length, off_t offset, c
 	strcpy(seed->name, name);
 	seed->offset=offset;
 	seed->next=NULL;
+	//seed->mutex=PTHREAD_MUTEX_INITIALIZER;
+	pthread_mutex_init(&(seed->mutex), NULL);
 	
 	return seed;
 
 }
 
-struct inode_q *initialize()
+struct inode_q* initialize()
 {
 
 	//This is our array of inodes, shartened down to 256 for testing.
 	struct inode_q *inode_array= malloc(1000000 * sizeof(struct inode_q));
 	return inode_array;
-	
 }
 
+
 //This function searches through a list of dirents and returns the one with a matching name to the name requested.
-int retindex (dirent_q *root, char* name)
+int retindex (struct dirent_q *root, const char* name)
 {
 	struct dirent_q* temp=root;
 	while(temp!=NULL)
@@ -85,7 +96,7 @@ int retindex (dirent_q *root, char* name)
 }
 
 //This function searches through a list of dirents and returns the one with a matching type to the type requested.
-char rettype (struct dirent_q *root, char* name)
+char rettype (struct dirent_q *root, const char* name)
 {
 	struct dirent_q* temp=root;
 	while(temp!=NULL)
@@ -114,7 +125,7 @@ struct dirent_q* retdirent (struct dirent_q *root, off_t offset)
 	return NULL;
 }
 
-struct dirent_q* finddirent(char *path, struct dirent_q* root)
+struct dirent_q* finddirent(const char *path, struct dirent_q* root)
 {
 	struct dirent_q *temp=root;
 	while(temp!=NULL)
@@ -133,29 +144,35 @@ struct dirent_q* finddirent(char *path, struct dirent_q* root)
 int capture_spot(struct inode_q array[])
 {
 	int count=0;
-	int length=(sizeof(array)/sizeof(inode_q));
+	int length=(sizeof(array)/sizeof(struct inode_q));
 	
 	while(count<length)
 	{
-		if(array[count]!=NULL)
+		if(array[count].type=='f' || array[count].type=='d')
+		{
+			count++;
+		}
+		else
 		{
 			return count;
 		}
-		count++;
+		
 	}
 	return -1;
 }
 
-struct dirent_q * lobotomy(char * path){
+struct dirent_q * lobotomy(const char *path, struct dirent_q *root){
 	
-	for(int i = (strlen(path)-1); int i >= 0; i--)
+	int i;
+	
+	for(i = ((strlen(path))-1); i >= 0; i--)
 	{
-		if(path[i] == "\")
+		if(path[i]=='/')
 		{
 			char temp[strlen(path)];
-			strcpy(temp, path)
-			temp[i] = "\0";
-			return followPath(temp);
+			strcpy(temp, path);
+			temp[i] = '\0';
+			return finddirent(temp, root);
 		}
 	}
 	return NULL;
